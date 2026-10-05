@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="sv">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Free Rooms</title>
+    <title>Lediga rum</title>
     <link rel="icon" href="ies.ico" type="image/x-icon">
     <style>
         :root {
@@ -41,6 +41,7 @@
         #header-text { flex: 2; text-align: center; }
         #legend { flex: 1; display: flex; justify-content: flex-end; gap: 1.5vh; font-size: clamp(0.7rem, 1.8vh, 2rem); font-weight: 600; color: var(--color-text-secondary); }
         .legend-item { display: flex; align-items: center; gap: 0.6vh; white-space: nowrap; }
+        .log-link { text-decoration: none; border: 1px solid currentColor; border-radius: 0.6vh; padding: 0 1vh; color: #2980b9; }
         .dot { width: 1.8vh; height: 1.8vh; border-radius: 50%; display: inline-block; }
         .dot.free { background: var(--color-free); }
         .dot.short { background: var(--color-short); }
@@ -112,17 +113,18 @@
 
     <div id="header">
         <div id="logo-container">
-            <img id="logo-img" src="logo.png" alt="School Logo" onerror="this.style.display='none'">
+            <img id="logo-img" src="logo.png" alt="Skolans logotyp" onerror="this.style.display='none'">
         </div>
         <div id="header-text">
-            <h1>Free Rooms</h1>
+            <h1>Lediga rum</h1>
             <div id="clock">Loading...</div>
             <div id="week-display"></div>
         </div>
         <div id="legend">
-            <span class="legend-item"><span class="dot free"></span>Free</span>
-            <span class="legend-item">Click a room = cleaned</span>
-            <span class="legend-item"><span class="dot busy"></span>In use</span>
+            <span class="legend-item"><span class="dot free"></span>Ledigt</span>
+            <span class="legend-item">Klicka på rum = städat</span>
+            <span class="legend-item"><span class="dot busy"></span>Upptaget</span>
+            <a class="log-link" href="logg.html">Städlogg</a>
         </div>
     </div>
 
@@ -134,6 +136,7 @@
         const DAY_START = 7 * 60;                  // 07:00
         const DAY_END = 17 * 60;                   // 17:00
         const MIN_CLEAN_MINUTES = 30;              // free windows shorter than this are ignored
+        const RESET_TIME = 12 * 60;                // 12:00 – städmarkeringar nollställs (loggen sparas)
         const HIDE_SHORT = true;                   // hide rooms that are free now but for less than MIN_CLEAN_MINUTES
         // Rooms matching any of these (case-insensitive regex) are never shown
         const EXCLUDED_ROOM_PATTERNS = [/^outside/i, /^#cart/i, /^lögarängen/i, /^vgf/i, /^hkk/i, /corridor/i];
@@ -145,21 +148,40 @@
 
         let allLessons = [];
 
-        // ---- "cleaned" marks: stored per day in this browser, reset automatically next day ----
+        // ---- Städmarkeringar: sparas per dag och halvdag (nollställs 12:00), samt i en logg ----
         const CLEANED_KEY = 'freeRooms.cleaned';
-        let cleaned = new Map();   // room -> 'HH:MM' it was marked cleaned
-        let cleanedDay = '';
-        function loadCleaned(dayKey) {
+        const LOG_KEY = 'freeRooms.log';
+        let cleaned = new Map();   // rum -> 'HH:MM' då det markerades som städat
+        let cleanedDay = '';       // 'ÅÅÅÅ-MM-DD|fm' eller 'ÅÅÅÅ-MM-DD|em'
+        function loadCleaned(key) {
             try {
                 const o = JSON.parse(localStorage.getItem(CLEANED_KEY) || 'null');
-                if (o && o.date === dayKey) {
-                    return Array.isArray(o.rooms) ? new Map(o.rooms.map(r => [r, ''])) : new Map(Object.entries(o.rooms));
-                }
+                if (o && o.date === key) return new Map(Object.entries(o.rooms));
             } catch (e) {}
             return new Map();
         }
         function saveCleaned() {
             try { localStorage.setItem(CLEANED_KEY, JSON.stringify({ date: cleanedDay, rooms: Object.fromEntries(cleaned) })); } catch (e) {}
+        }
+        function readLog() {
+            try { const a = JSON.parse(localStorage.getItem(LOG_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+        }
+        function writeLog(a) {
+            try { localStorage.setItem(LOG_KEY, JSON.stringify(a)); } catch (e) {}
+        }
+        function addLog(date, room, time) {
+            const d = new Date(); d.setDate(d.getDate() - 90);
+            const cutoff = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            const a = readLog().filter(x => x.date >= cutoff);
+            a.push({ date, room, time });
+            writeLog(a);
+        }
+        function removeLog(date, room, time) {
+            const a = readLog();
+            for (let i = a.length - 1; i >= 0; i--) {
+                if (a[i].date === date && a[i].room === room && a[i].time === time) { a.splice(i, 1); break; }
+            }
+            writeLog(a);
         }
         const CLEAN_ICON = `<svg class="clean-icon" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" stroke-linejoin="round" stroke-linecap="round">
             <g transform="translate(50 45) rotate(25)">
@@ -309,7 +331,7 @@
         }
 
         function nextWindowText(next) {
-            return next ? `Next free: ${minutesToTime(next.s)}, ${next.e - next.s} min` : 'No more free time today';
+            return next ? `Nästa lediga: ${minutesToTime(next.s)}, ${next.e - next.s} min` : 'Inga fler lediga tider idag';
         }
 
         function escapeHtml(s) {
@@ -319,22 +341,22 @@
         function cardHTML(st) {
             let big, main = '', next = '';
             if (st.cleaned) {
-                big = st.cleanedAt || 'Done'; main = 'Cleaned';
+                big = st.cleanedAt || 'Klart'; main = 'Städat';
             } else if (st.closed) {
-                big = 'FREE'; main = 'School closed';
+                big = 'LEDIGT'; main = 'Skolan är stängd';
             } else if (st.state === 'busy') {
-                if (st.next) { big = `From ${minutesToTime(st.next.s)}`; main = `Free for ${st.next.e - st.next.s} min`; }
-                else { big = 'IN USE'; main = 'No free time left today'; }
+                if (st.next) { big = `Från ${minutesToTime(st.next.s)}`; main = `Ledigt i ${st.next.e - st.next.s} min`; }
+                else { big = 'UPPTAGET'; main = 'Ingen ledig tid kvar idag'; }
             } else if (st.state === 'free') {
-                if (st.allDay) { big = 'All day'; main = "Free all day"; }
+                if (st.allDay) { big = 'Hela dagen'; main = 'Ledigt hela dagen'; }
                 else {
-                    big = `Until ${minutesToTime(st.until)}`;
-                    main = st.restOfDay ? `Free rest of day (${st.remaining} min)` : `${st.remaining} min free`;
+                    big = `Till ${minutesToTime(st.until)}`;
+                    main = st.restOfDay ? `Ledigt resten av dagen (${st.remaining} min)` : `${st.remaining} min ledigt`;
                     next = st.restOfDay ? '' : nextWindowText(st.next);
                 }
             } else {
-                big = `Until ${minutesToTime(st.until)}`;
-                main = `Only ${st.remaining} min free`;
+                big = `Till ${minutesToTime(st.until)}`;
+                main = `Bara ${st.remaining} min ledigt`;
                 next = nextWindowText(st.next);
             }
             return `<div class="room-card ${st.state}${st.cleaned ? ' cleaned' : ''}" data-room="${escapeHtml(st.room)}">
@@ -343,7 +365,7 @@
                 <div class="room-main">${main}</div>
                 <div class="room-next">${next}</div>
                 ${CLEAN_ICON}
-                <button class="clear-btn" title="Clear" aria-label="Clear cleaned mark">&#10005;</button>
+                <button class="clear-btn" title="Ta bort" aria-label="Ta bort städmarkering">&#10005;</button>
             </div>`;
         }
 
@@ -386,7 +408,7 @@
             if (allLessons.length === 0) return;
             const grid = document.getElementById('grid');
             const dayMap = ["", "Mon", "Tue", "Wed", "Thur", "Fri"];
-            const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+            const dayNames = ["Söndag", "Måndag", "Tisdag", "Onsdag", "Torsdag", "Fredag", "Lördag"];
 
             const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Stockholm" }));
             let nowDay = now.getDay();
@@ -402,7 +424,7 @@
             if (weekParam) currentWeek = parseInt(weekParam, 10);
 
             document.getElementById('clock').textContent = `${dayNames[nowDay]}, ${minutesToTime(nowMinutes)}`;
-            document.getElementById('week-display').textContent = `Week ${currentWeek}`;
+            document.getElementById('week-display').textContent = `Vecka ${currentWeek}`;
 
             const dayStr = dayMap[nowDay] || '';
             const closed = !dayStr || nowMinutes < DAY_START || nowMinutes >= DAY_END;
@@ -414,8 +436,9 @@
                 rooms = rooms.filter(r => prefixes.some(p => r.toLowerCase().startsWith(p)));
             }
 
-            const dayKey = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
-            if (cleanedDay !== dayKey) { cleaned = loadCleaned(dayKey); cleanedDay = dayKey; }
+            const iso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+            const periodKey = iso + (nowMinutes < RESET_TIME ? '|fm' : '|em');
+            if (cleanedDay !== periodKey) { cleaned = loadCleaned(periodKey); cleanedDay = periodKey; }
 
             let statuses = rooms.map(r => getRoomStatus(r, dayStr, currentWeek, nowMinutes, closed));
             if (HIDE_SHORT) statuses = statuses.filter(s => s.state !== 'short');
@@ -425,7 +448,7 @@
 
             if (statuses.length === 0) {
                 grid.style.gridTemplateColumns = '1fr'; grid.style.gridTemplateRows = '1fr';
-                grid.innerHTML = '<div class="message">No rooms free for 30+ minutes.</div>';
+                grid.innerHTML = '<div class="message">Inga rum lediga i 30+ minuter.</div>';
                 return;
             }
             grid.innerHTML = statuses.map(cardHTML).join('');
@@ -445,7 +468,7 @@
                 console.error(error);
                 const grid = document.getElementById('grid');
                 grid.style.gridTemplateColumns = '1fr'; grid.style.gridTemplateRows = '1fr';
-                grid.innerHTML = `<div class="message error"><h2>Error: Could not load schedule.</h2><p>${escapeHtml(error.message)}</p><p>Please make sure <b>Lessons.tsv</b> is in the same folder and public.</p></div>`;
+                grid.innerHTML = `<div class="message error"><h2>Fel: Kunde inte ladda schemat.</h2><p>${escapeHtml(error.message)}</p><p>Kontrollera att <b>Lessons.tsv</b> ligger i samma mapp och är publik.</p></div>`;
             }
         }
 
@@ -453,12 +476,16 @@
             const card = e.target.closest('.room-card');
             if (!card) return;
             const room = card.dataset.room;
+            const iso = cleanedDay.split('|')[0];
             if (cleaned.has(room)) {
-                if (!e.target.closest('.clear-btn')) return;   // only the X clears a cleaned mark
+                if (!e.target.closest('.clear-btn')) return;   // bara krysset tar bort en städmarkering
+                removeLog(iso, room, cleaned.get(room));
                 cleaned.delete(room);
             } else {
                 const t = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Stockholm" }));
-                cleaned.set(room, minutesToTime(t.getHours() * 60 + t.getMinutes()));
+                const time = minutesToTime(t.getHours() * 60 + t.getMinutes());
+                cleaned.set(room, time);
+                addLog(iso, room, time);
             }
             saveCleaned();
             updateDashboard();
