@@ -76,7 +76,7 @@
 
         .room-name   { font-size: min(calc(var(--ch) * 0.15), calc(var(--cw) * 0.11)); font-weight: 800; line-height: 1.05; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .room-name.long { font-size: min(calc(var(--ch) * 0.1), calc(var(--cw) * 0.075)); }
-        .room-status { font-size: min(calc(var(--ch) * 0.24), calc(var(--cw) * 0.17)); font-weight: 800; line-height: 1; letter-spacing: 0.02em; }
+        .room-status { font-size: min(calc(var(--ch) * 0.2), calc(var(--cw) * 0.13)); font-weight: 800; line-height: 1; white-space: nowrap; }
         .free  .room-status { color: var(--color-free); }
         .short .room-status { color: var(--color-short); }
         .busy  .room-status { color: var(--color-busy); }
@@ -273,27 +273,27 @@
         }
 
         function cardHTML(st) {
-            let status, main = '', next = '';
+            let big, main = '', next = '';
             if (st.closed) {
-                status = 'FREE'; main = 'School closed';
+                big = 'FREE'; main = 'School closed';
             } else if (st.state === 'busy') {
-                status = 'IN USE';
-                if (st.next) { main = `Free from ${minutesToTime(st.next.s)}`; next = `for ${st.next.e - st.next.s} min`; }
-                else main = 'No free time left today';
+                if (st.next) { big = `From ${minutesToTime(st.next.s)}`; main = `Free for ${st.next.e - st.next.s} min`; }
+                else { big = 'IN USE'; main = 'No free time left today'; }
             } else if (st.state === 'free') {
-                status = 'FREE';
-                if (st.allDay) main = 'Free all day';
-                else if (st.restOfDay) main = `Rest of day (${st.remaining} min)`;
-                else main = `Until ${minutesToTime(st.until)} (${st.remaining} min)`;
-                next = st.restOfDay ? '' : nextWindowText(st.next);
+                if (st.allDay) { big = 'All day'; main = "Free all day"; }
+                else {
+                    big = `Until ${minutesToTime(st.until)}`;
+                    main = st.restOfDay ? `Free rest of day (${st.remaining} min)` : `${st.remaining} min free`;
+                    next = st.restOfDay ? '' : nextWindowText(st.next);
+                }
             } else {
-                status = 'FREE';
-                main = `Only ${st.remaining} min, until ${minutesToTime(st.until)}`;
+                big = `Until ${minutesToTime(st.until)}`;
+                main = `Only ${st.remaining} min free`;
                 next = nextWindowText(st.next);
             }
             return `<div class="room-card ${st.state}">
                 <div class="room-name${st.room.length > 9 ? ' long' : ''}">${escapeHtml(st.room)}</div>
-                <div class="room-status">${status}</div>
+                <div class="room-status">${big}</div>
                 <div class="room-main">${main}</div>
                 <div class="room-next">${next}</div>
             </div>`;
