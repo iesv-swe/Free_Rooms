@@ -37,7 +37,7 @@
 
         #header { display: flex; align-items: center; margin-bottom: 1vh; height: 10vh; flex-shrink: 0; }
         #logo-container { flex: 1; text-align: left; height: 100%; display: flex; align-items: center; }
-        #logo-img { height: 90%; width: auto; max-height: 9vh; }
+        #logo-img { height: 90%; width: auto; max-height: 9vh; mix-blend-mode: multiply; }
         #header-text { flex: 2; text-align: center; }
         #legend { flex: 1; display: flex; justify-content: flex-end; gap: 1.5vh; font-size: clamp(0.7rem, 1.8vh, 2rem); font-weight: 600; color: var(--color-text-secondary); }
         .legend-item { display: flex; align-items: center; gap: 0.6vh; white-space: nowrap; }
@@ -70,6 +70,14 @@
             justify-content: space-between;
             min-width: 0;
         }
+        .room-card { position: relative; cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent; }
+        .room-card.cleaned { background: #eef1f3 !important; border-left-color: #95a5a6 !important; }
+        .room-card.cleaned .room-name { opacity: 0.45; }
+        .room-card.cleaned .room-status { color: var(--color-text-header); }
+        .clean-icon { display: none; position: absolute; right: 4%; top: 50%; transform: translateY(-50%); height: calc(var(--ch) * 0.8); width: calc(var(--ch) * 0.8); pointer-events: none; }
+        .room-card.cleaned .clean-icon { display: block; top: 56%; height: calc(var(--ch) * 0.68); width: calc(var(--ch) * 0.68); }
+        .clear-btn { display: none; position: absolute; top: calc(var(--ch) * 0.05); right: calc(var(--ch) * 0.05); width: calc(var(--ch) * 0.2); height: calc(var(--ch) * 0.2); border: 0; border-radius: 50%; background: var(--color-busy); color: #fff; font-weight: 800; font-size: calc(var(--ch) * 0.14); line-height: 1; padding: 0; cursor: pointer; align-items: center; justify-content: center; }
+        .room-card.cleaned .clear-btn { display: flex; }
         .room-card.free  { border-left-color: var(--color-free);  background: var(--color-free-bg); }
         .room-card.short { border-left-color: var(--color-short); background: var(--color-short-bg); }
         .room-card.busy  { border-left-color: var(--color-busy);  background: var(--color-busy-bg); }
@@ -113,7 +121,7 @@
         </div>
         <div id="legend">
             <span class="legend-item"><span class="dot free"></span>Free</span>
-            <span class="legend-item"><span class="dot short"></span>Free, too short</span>
+            <span class="legend-item">Click a room = cleaned</span>
             <span class="legend-item"><span class="dot busy"></span>In use</span>
         </div>
     </div>
@@ -125,7 +133,8 @@
         const excludedStaff = ["VikCos"];          // lessons with these teachers are skipped (same as Now & Next)
         const DAY_START = 7 * 60;                  // 07:00
         const DAY_END = 17 * 60;                   // 17:00
-        const MIN_CLEAN_MINUTES = 15;              // free windows shorter than this are "too short"
+        const MIN_CLEAN_MINUTES = 30;              // free windows shorter than this are ignored
+        const HIDE_SHORT = true;                   // hide rooms that are free now but for less than MIN_CLEAN_MINUTES
         // Rooms matching any of these (case-insensitive regex) are never shown
         const EXCLUDED_ROOM_PATTERNS = [/^outside/i, /^#cart/i, /^lögarängen/i, /^vgf/i, /^hkk/i, /corridor/i];
         // Optional URL parameters:
@@ -135,6 +144,41 @@
         // -----------------------------------------------------
 
         let allLessons = [];
+
+        // ---- "cleaned" marks: stored per day in this browser, reset automatically next day ----
+        const CLEANED_KEY = 'freeRooms.cleaned';
+        let cleaned = new Map();   // room -> 'HH:MM' it was marked cleaned
+        let cleanedDay = '';
+        function loadCleaned(dayKey) {
+            try {
+                const o = JSON.parse(localStorage.getItem(CLEANED_KEY) || 'null');
+                if (o && o.date === dayKey) {
+                    return Array.isArray(o.rooms) ? new Map(o.rooms.map(r => [r, ''])) : new Map(Object.entries(o.rooms));
+                }
+            } catch (e) {}
+            return new Map();
+        }
+        function saveCleaned() {
+            try { localStorage.setItem(CLEANED_KEY, JSON.stringify({ date: cleanedDay, rooms: Object.fromEntries(cleaned) })); } catch (e) {}
+        }
+        const CLEAN_ICON = `<svg class="clean-icon" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" stroke-linejoin="round" stroke-linecap="round">
+            <g transform="translate(50 45) rotate(25)">
+                <line x1="0" y1="-50" x2="0" y2="12" stroke="#7a4a1d" stroke-width="5"/>
+                <rect x="-13" y="8" width="26" height="7" rx="2" fill="#5d3a12" stroke="#2c1a06" stroke-width="2"/>
+                <polygon points="-13,15 13,15 18,42 -18,42" fill="#e6b422" stroke="#2c1a06" stroke-width="2"/>
+                <line x1="-6" y1="17" x2="-8" y2="40" stroke="#2c1a06" stroke-width="1.5"/>
+                <line x1="0" y1="17" x2="0" y2="40" stroke="#2c1a06" stroke-width="1.5"/>
+                <line x1="6" y1="17" x2="8" y2="40" stroke="#2c1a06" stroke-width="1.5"/>
+            </g>
+            <g transform="translate(50 45) rotate(-25)">
+                <line x1="0" y1="-50" x2="0" y2="12" stroke="#34495e" stroke-width="5"/>
+                <rect x="-10" y="8" width="20" height="6" rx="2" fill="#7f8c8d" stroke="#1b2631" stroke-width="2"/>
+                <path d="M-15 14 H15 L17 38 Q12 44 8 38 Q4 44 0 38 Q-4 44 -8 38 Q-12 44 -17 38 Z" fill="#ecf0f1" stroke="#1b2631" stroke-width="2"/>
+                <line x1="-8" y1="17" x2="-8" y2="36" stroke="#95a5a6" stroke-width="1.5"/>
+                <line x1="0" y1="17" x2="0" y2="36" stroke="#95a5a6" stroke-width="1.5"/>
+                <line x1="8" y1="17" x2="8" y2="36" stroke="#95a5a6" stroke-width="1.5"/>
+            </g>
+        </svg>`;
 
         function getURLParameter(name) {
             return new URLSearchParams(window.location.search).get(name);
@@ -274,7 +318,9 @@
 
         function cardHTML(st) {
             let big, main = '', next = '';
-            if (st.closed) {
+            if (st.cleaned) {
+                big = st.cleanedAt || 'Done'; main = 'Cleaned';
+            } else if (st.closed) {
                 big = 'FREE'; main = 'School closed';
             } else if (st.state === 'busy') {
                 if (st.next) { big = `From ${minutesToTime(st.next.s)}`; main = `Free for ${st.next.e - st.next.s} min`; }
@@ -291,19 +337,22 @@
                 main = `Only ${st.remaining} min free`;
                 next = nextWindowText(st.next);
             }
-            return `<div class="room-card ${st.state}">
+            return `<div class="room-card ${st.state}${st.cleaned ? ' cleaned' : ''}" data-room="${escapeHtml(st.room)}">
                 <div class="room-name${st.room.length > 9 ? ' long' : ''}">${escapeHtml(st.room)}</div>
                 <div class="room-status">${big}</div>
                 <div class="room-main">${main}</div>
                 <div class="room-next">${next}</div>
+                ${CLEAN_ICON}
+                <button class="clear-btn" title="Clear" aria-label="Clear cleaned mark">&#10005;</button>
             </div>`;
         }
 
         function sortStatuses(list, closed) {
             const collator = new Intl.Collator('en', { numeric: true });
-            if (closed) return list.sort((a, b) => collator.compare(a.room, b.room));
+            if (closed) return list.sort((a, b) => (a.cleaned - b.cleaned) || collator.compare(a.room, b.room));
             const rank = { free: 0, short: 1, busy: 2 };
             return list.sort((a, b) => {
+                if (a.cleaned !== b.cleaned) return a.cleaned ? 1 : -1;
                 if (rank[a.state] !== rank[b.state]) return rank[a.state] - rank[b.state];
                 if (a.state !== 'busy') return (b.remaining - a.remaining) || collator.compare(a.room, b.room);
                 return (a.sortKey - b.sortKey) || collator.compare(a.room, b.room);
@@ -365,13 +414,18 @@
                 rooms = rooms.filter(r => prefixes.some(p => r.toLowerCase().startsWith(p)));
             }
 
+            const dayKey = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+            if (cleanedDay !== dayKey) { cleaned = loadCleaned(dayKey); cleanedDay = dayKey; }
+
             let statuses = rooms.map(r => getRoomStatus(r, dayStr, currentWeek, nowMinutes, closed));
+            if (HIDE_SHORT) statuses = statuses.filter(s => s.state !== 'short');
+            statuses.forEach(s => { s.cleaned = cleaned.has(s.room); s.cleanedAt = cleaned.get(s.room); });
             if ((getURLParameter('show') || '').toLowerCase() === 'free') statuses = statuses.filter(s => s.state !== 'busy');
             statuses = sortStatuses(statuses, closed);
 
             if (statuses.length === 0) {
                 grid.style.gridTemplateColumns = '1fr'; grid.style.gridTemplateRows = '1fr';
-                grid.innerHTML = '<div class="message">No rooms to show.</div>';
+                grid.innerHTML = '<div class="message">No rooms free for 30+ minutes.</div>';
                 return;
             }
             grid.innerHTML = statuses.map(cardHTML).join('');
@@ -394,6 +448,21 @@
                 grid.innerHTML = `<div class="message error"><h2>Error: Could not load schedule.</h2><p>${escapeHtml(error.message)}</p><p>Please make sure <b>Lessons.tsv</b> is in the same folder and public.</p></div>`;
             }
         }
+
+        document.getElementById('grid').addEventListener('click', e => {
+            const card = e.target.closest('.room-card');
+            if (!card) return;
+            const room = card.dataset.room;
+            if (cleaned.has(room)) {
+                if (!e.target.closest('.clear-btn')) return;   // only the X clears a cleaned mark
+                cleaned.delete(room);
+            } else {
+                const t = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Stockholm" }));
+                cleaned.set(room, minutesToTime(t.getHours() * 60 + t.getMinutes()));
+            }
+            saveCleaned();
+            updateDashboard();
+        });
 
         window.addEventListener('resize', updateDashboard);
         window.addEventListener('orientationchange', updateDashboard);
