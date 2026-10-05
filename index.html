@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Free Rooms</title>
+    <link rel="icon" href="ies.ico" type="image/x-icon">
+    <style>
+        :root {
+            --color-bg: #f4f7f6;
+            --color-card: #ffffff;
+            --color-border: #e0e0e0;
+            --color-text-primary: #2c3e50;
+            --color-text-secondary: #5a7a9b;
+            --color-text-header: #34495e;
+            --color-free: #27ae60;
+            --color-free-bg: #e8f6ee;
+            --color-short: #e08e0b;
+            --color-short-bg: #fff4de;
+            --color-busy: #c0392b;
+            --color-busy-bg: #fdecea;
+            --ch: 150px;
+            --cw: 200px;
+            --font-main: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        * { box-sizing: border-box; }
+        html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
+        body {
+            font-family: var(--font-main);
+            background-color: var(--color-bg);
+            color: var(--color-text-primary);
+            display: flex;
+            flex-direction: column;
+            padding: 1vh;
+        }
+
+        #header { display: flex; align-items: center; margin-bottom: 1vh; height: 10vh; flex-shrink: 0; }
+        #logo-container { flex: 1; text-align: left; height: 100%; display: flex; align-items: center; }
+        #logo-img { height: 90%; width: auto; max-height: 9vh; }
+        #header-text { flex: 2; text-align: center; }
+        #legend { flex: 1; display: flex; justify-content: flex-end; gap: 1.5vh; font-size: clamp(0.7rem, 1.8vh, 2rem); font-weight: 600; color: var(--color-text-secondary); }
+        .legend-item { display: flex; align-items: center; gap: 0.6vh; white-space: nowrap; }
+        .dot { width: 1.8vh; height: 1.8vh; border-radius: 50%; display: inline-block; }
+        .dot.free { background: var(--color-free); }
+        .dot.short { background: var(--color-short); }
+        .dot.busy { background: var(--color-busy); }
+
+        h1 { color: var(--color-text-header); font-size: clamp(1.4rem, 3.5vh, 4rem); margin: 0 0 0.3vh 0; line-height: 1.1; }
+        #clock { font-size: clamp(1rem, 2.4vh, 3rem); color: var(--color-text-secondary); margin: 0; line-height: 1.2; }
+        #week-display { font-size: clamp(0.8rem, 1.8vh, 2.5rem); font-weight: bold; color: var(--color-text-header); margin: 0; line-height: 1.2; }
+
+        #grid {
+            flex: 1;
+            min-height: 0;
+            display: grid;
+            gap: 0.8vh;
+        }
+
+        .room-card {
+            background: var(--color-card);
+            border: 1px solid var(--color-border);
+            border-left-width: 1.2vh;
+            border-radius: 1vh;
+            box-shadow: 0 0.4vh 1.2vh rgba(0,0,0,0.05);
+            overflow: hidden;
+            padding: calc(var(--ch) * 0.03) calc(var(--cw) * 0.05);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            min-width: 0;
+        }
+        .room-card.free  { border-left-color: var(--color-free);  background: var(--color-free-bg); }
+        .room-card.short { border-left-color: var(--color-short); background: var(--color-short-bg); }
+        .room-card.busy  { border-left-color: var(--color-busy);  background: var(--color-busy-bg); }
+
+        .room-name   { font-size: min(calc(var(--ch) * 0.15), calc(var(--cw) * 0.11)); font-weight: 800; line-height: 1.05; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .room-name.long { font-size: min(calc(var(--ch) * 0.1), calc(var(--cw) * 0.075)); }
+        .room-status { font-size: min(calc(var(--ch) * 0.24), calc(var(--cw) * 0.17)); font-weight: 800; line-height: 1; letter-spacing: 0.02em; }
+        .free  .room-status { color: var(--color-free); }
+        .short .room-status { color: var(--color-short); }
+        .busy  .room-status { color: var(--color-busy); }
+        .room-main { font-size: min(calc(var(--ch) * 0.11), calc(var(--cw) * 0.08)); font-weight: 700; line-height: 1.1; }
+        .room-next { font-size: min(calc(var(--ch) * 0.09), calc(var(--cw) * 0.065)); font-weight: 600; line-height: 1.15; color: var(--color-text-secondary); }
+
+        .message { grid-column: 1 / -1; font-size: 3vh; text-align: center; padding: 4vh; }
+        .message.error { color: red; }
+
+        /* Mobile: single column, scrolling allowed. Does not affect TV layouts. */
+        @media (max-width: 768px) {
+            html, body { overflow: auto; height: auto; }
+            body { padding: 0.5vh; }
+            #header { height: auto; flex-direction: column; }
+            #logo-container, #legend { display: none; }
+            h1 { font-size: 1.8rem; }
+            #clock { font-size: 1.2rem; }
+            #week-display { font-size: 1rem; }
+            #grid { display: block !important; }
+            .room-card { height: 150px; margin-bottom: 1vh; border-left-width: 8px; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="header">
+        <div id="logo-container">
+            <img id="logo-img" src="logo.png" alt="School Logo" onerror="this.style.display='none'">
+        </div>
+        <div id="header-text">
+            <h1>Free Rooms</h1>
+            <div id="clock">Loading...</div>
+            <div id="week-display"></div>
+        </div>
+        <div id="legend">
+            <span class="legend-item"><span class="dot free"></span>Free</span>
+            <span class="legend-item"><span class="dot short"></span>Free, too short</span>
+            <span class="legend-item"><span class="dot busy"></span>In use</span>
+        </div>
+    </div>
+
+    <div id="grid"></div>
+
+    <script>
+        // ---------------- CONFIG (edit here) ----------------
+        const excludedStaff = ["VikCos"];          // lessons with these teachers are skipped (same as Now & Next)
+        const DAY_START = 7 * 60;                  // 07:00
+        const DAY_END = 17 * 60;                   // 17:00
+        const MIN_CLEAN_MINUTES = 15;              // free windows shorter than this are "too short"
+        // Rooms matching any of these (case-insensitive regex) are never shown
+        const EXCLUDED_ROOM_PATTERNS = [/^outside/i, /^#cart/i, /^lögarängen/i, /^vgf/i, /^hkk/i, /corridor/i];
+        // Optional URL parameters:
+        //   ?view=A,B        only rooms whose name starts with A or B (e.g. one screen per building)
+        //   ?show=free       hide rooms that are in use right now
+        //   ?day=Tue&time=1030&week=40   simulate a moment (for testing)
+        // -----------------------------------------------------
+
+        let allLessons = [];
+
+        function getURLParameter(name) {
+            return new URLSearchParams(window.location.search).get(name);
+        }
+
+        function timeToMinutes(timeStr) {
+            return parseInt(timeStr.substring(0, 2), 10) * 60 + parseInt(timeStr.substring(2, 4), 10);
+        }
+
+        function minutesToTime(totalMinutes) {
+            const h = Math.floor(totalMinutes / 60), m = totalMinutes % 60;
+            return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+        }
+
+        function getWeekNumber(date) {
+            const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+            d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+            const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+            return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+        }
+
+        function parseWeekRanges(rangeStr) {
+            const weeks = [];
+            if (!rangeStr || rangeStr.trim() === "0") return weeks;
+            for (const part of rangeStr.split(',')) {
+                if (part.includes('-')) {
+                    const [start, end] = part.split('-').map(Number);
+                    for (let i = start; i <= end; i++) weeks.push(i);
+                } else {
+                    weeks.push(Number(part));
+                }
+            }
+            return weeks;
+        }
+
+        function isExcludedRoom(room) {
+            return EXCLUDED_ROOM_PATTERNS.some(re => re.test(room));
+        }
+
+        // One lesson object per room listed in the room cell (e.g. "A14,A19" -> 2 objects)
+        function parseLessons(tsv) {
+            const lessons = [];
+            const lines = tsv.trim().split(/[\r\n]+/);
+            if (lines.length < 2) { console.error("No data found or invalid data format."); return []; }
+            const headers = lines[0].split('\t').map(h => h.trim());
+            const colIdx = {
+                subject: headers.indexOf('subject'),
+                day: headers.indexOf('day'),
+                starttime: headers.indexOf('starttime'),
+                length: headers.indexOf('length'),
+                room: headers.indexOf('room'),
+                realweeks: headers.indexOf('realweeks'),
+                teacher: headers.indexOf('teacher')
+            };
+            for (const key in colIdx) {
+                if (colIdx[key] === -1) { console.error(`Error: Required column "${key}" not found in data.`); return []; }
+            }
+            const validDays = ["Mon", "Tue", "Wed", "Thur", "Fri"];
+            for (let i = 1; i < lines.length; i++) {
+                const values = lines[i].split('\t');
+                if (values.length < headers.length - 1) continue;
+                const roomStr = (values[colIdx.room] || '').trim();
+                if (!roomStr) continue;
+                const teachers = (values[colIdx.teacher] || '').split(',').map(t => t.trim());
+                if (teachers.some(t => excludedStaff.includes(t))) continue;
+                const day = values[colIdx.day].trim();
+                const startTimeStr = values[colIdx.starttime].trim().padStart(4, '0');
+                const length = parseInt(values[colIdx.length], 10);
+                if (!validDays.includes(day) || !startTimeStr || !(length > 0)) continue;
+                const startTime = timeToMinutes(startTimeStr);
+                const validWeeks = parseWeekRanges(values[colIdx.realweeks]);
+                for (const r of roomStr.split(',')) {
+                    const room = r.trim();
+                    if (!room || isExcludedRoom(room)) continue;
+                    lessons.push({ room, day, startTime, endTime: startTime + length, validWeeks });
+                }
+            }
+            return lessons;
+        }
+
+        // Merge overlapping/adjacent lessons into busy blocks, clipped to the school day
+        function buildBusyBlocks(lessons) {
+            const sorted = lessons
+                .map(l => ({ s: Math.max(l.startTime, DAY_START), e: Math.min(l.endTime, DAY_END) }))
+                .filter(b => b.e > b.s)
+                .sort((a, b) => a.s - b.s);
+            const blocks = [];
+            for (const b of sorted) {
+                const last = blocks[blocks.length - 1];
+                if (last && b.s <= last.e) last.e = Math.max(last.e, b.e);
+                else blocks.push({ s: b.s, e: b.e });
+            }
+            return blocks;
+        }
+
+        function buildGaps(blocks) {
+            const gaps = [];
+            let cursor = DAY_START;
+            for (const b of blocks) {
+                if (b.s > cursor) gaps.push({ s: cursor, e: b.s });
+                cursor = Math.max(cursor, b.e);
+            }
+            if (cursor < DAY_END) gaps.push({ s: cursor, e: DAY_END });
+            return gaps;
+        }
+
+        function getRoomStatus(room, dayStr, currentWeek, nowMinutes, closed) {
+            if (closed) return { room, state: 'free', closed: true, remaining: 0 };
+            const lessons = allLessons.filter(l => l.room === room && l.day === dayStr && l.validWeeks.includes(currentWeek));
+            const blocks = buildBusyBlocks(lessons);
+            const gaps = buildGaps(blocks);
+            const useful = gaps.filter(g => g.e - g.s >= MIN_CLEAN_MINUTES);
+            const cur = blocks.find(b => nowMinutes >= b.s && nowMinutes < b.e);
+
+            if (cur) {
+                const next = useful.find(g => g.s >= cur.e) || null;
+                return { room, state: 'busy', next, sortKey: next ? next.s : Infinity };
+            }
+            const gap = gaps.find(g => nowMinutes >= g.s && nowMinutes < g.e);
+            const remaining = gap.e - nowMinutes;
+            const restOfDay = gap.e === DAY_END;
+            const next = restOfDay ? null : (useful.find(g => g.s > gap.e) || null);
+            return {
+                room,
+                state: remaining >= MIN_CLEAN_MINUTES ? 'free' : 'short',
+                until: gap.e, remaining, restOfDay, allDay: blocks.length === 0, next
+            };
+        }
+
+        function nextWindowText(next) {
+            return next ? `Next free: ${minutesToTime(next.s)}, ${next.e - next.s} min` : 'No more free time today';
+        }
+
+        function escapeHtml(s) {
+            return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
+        function cardHTML(st) {
+            let status, main = '', next = '';
+            if (st.closed) {
+                status = 'FREE'; main = 'School closed';
+            } else if (st.state === 'busy') {
+                status = 'IN USE';
+                if (st.next) { main = `Free from ${minutesToTime(st.next.s)}`; next = `for ${st.next.e - st.next.s} min`; }
+                else main = 'No free time left today';
+            } else if (st.state === 'free') {
+                status = 'FREE';
+                if (st.allDay) main = 'Free all day';
+                else if (st.restOfDay) main = `Rest of day (${st.remaining} min)`;
+                else main = `Until ${minutesToTime(st.until)} (${st.remaining} min)`;
+                next = st.restOfDay ? '' : nextWindowText(st.next);
+            } else {
+                status = 'FREE';
+                main = `Only ${st.remaining} min, until ${minutesToTime(st.until)}`;
+                next = nextWindowText(st.next);
+            }
+            return `<div class="room-card ${st.state}">
+                <div class="room-name${st.room.length > 9 ? ' long' : ''}">${escapeHtml(st.room)}</div>
+                <div class="room-status">${status}</div>
+                <div class="room-main">${main}</div>
+                <div class="room-next">${next}</div>
+            </div>`;
+        }
+
+        function sortStatuses(list, closed) {
+            const collator = new Intl.Collator('en', { numeric: true });
+            if (closed) return list.sort((a, b) => collator.compare(a.room, b.room));
+            const rank = { free: 0, short: 1, busy: 2 };
+            return list.sort((a, b) => {
+                if (rank[a.state] !== rank[b.state]) return rank[a.state] - rank[b.state];
+                if (a.state !== 'busy') return (b.remaining - a.remaining) || collator.compare(a.room, b.room);
+                return (a.sortKey - b.sortKey) || collator.compare(a.room, b.room);
+            });
+        }
+
+        // Pick the column count that gives cards closest to a pleasant shape while filling the screen
+        function applyGrid(grid, count) {
+            if (window.innerWidth <= 768) {
+                grid.style.gridTemplateColumns = ''; grid.style.gridTemplateRows = '';
+                grid.style.setProperty('--ch', '150px'); grid.style.setProperty('--cw', (window.innerWidth - 20) + 'px');
+                return;
+            }
+            const W = grid.clientWidth, H = grid.clientHeight, target = 1.3;
+            let best = { cols: 1, score: Infinity };
+            for (let cols = 1; cols <= count; cols++) {
+                const rows = Math.ceil(count / cols);
+                const ratio = (W / cols) / (H / rows);
+                const score = Math.abs(Math.log(ratio / target)) + (cols * rows - count) * 0.01;
+                if (score < best.score) best = { cols, rows, score };
+            }
+            const rows = Math.ceil(count / best.cols);
+            grid.style.gridTemplateColumns = `repeat(${best.cols}, 1fr)`;
+            grid.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+            const gap = window.innerHeight * 0.008;
+            grid.style.setProperty('--cw', ((W - gap * (best.cols - 1)) / best.cols) + 'px');
+            grid.style.setProperty('--ch', ((H - gap * (rows - 1)) / rows) + 'px');
+        }
+
+        function updateDashboard() {
+            if (allLessons.length === 0) return;
+            const grid = document.getElementById('grid');
+            const dayMap = ["", "Mon", "Tue", "Wed", "Thur", "Fri"];
+            const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+            const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Stockholm" }));
+            let nowDay = now.getDay();
+            let nowMinutes = now.getHours() * 60 + now.getMinutes();
+            let currentWeek = getWeekNumber(now);
+
+            // Test overrides
+            const dayParam = getURLParameter('day');
+            if (dayParam && dayMap.indexOf(dayParam) > 0) nowDay = dayMap.indexOf(dayParam);
+            const timeParam = getURLParameter('time');
+            if (timeParam) nowMinutes = timeToMinutes(timeParam.padStart(4, '0'));
+            const weekParam = getURLParameter('week');
+            if (weekParam) currentWeek = parseInt(weekParam, 10);
+
+            document.getElementById('clock').textContent = `${dayNames[nowDay]}, ${minutesToTime(nowMinutes)}`;
+            document.getElementById('week-display').textContent = `Week ${currentWeek}`;
+
+            const dayStr = dayMap[nowDay] || '';
+            const closed = !dayStr || nowMinutes < DAY_START || nowMinutes >= DAY_END;
+
+            let rooms = [...new Set(allLessons.map(l => l.room))];
+            const view = getURLParameter('view');
+            if (view) {
+                const prefixes = view.toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
+                rooms = rooms.filter(r => prefixes.some(p => r.toLowerCase().startsWith(p)));
+            }
+
+            let statuses = rooms.map(r => getRoomStatus(r, dayStr, currentWeek, nowMinutes, closed));
+            if ((getURLParameter('show') || '').toLowerCase() === 'free') statuses = statuses.filter(s => s.state !== 'busy');
+            statuses = sortStatuses(statuses, closed);
+
+            if (statuses.length === 0) {
+                grid.style.gridTemplateColumns = '1fr'; grid.style.gridTemplateRows = '1fr';
+                grid.innerHTML = '<div class="message">No rooms to show.</div>';
+                return;
+            }
+            grid.innerHTML = statuses.map(cardHTML).join('');
+            applyGrid(grid, statuses.length);
+        }
+
+        async function loadDataAndRun() {
+            try {
+                const response = await fetch('Lessons.tsv?cachebust=' + Date.now(), { cache: 'no-store' });
+                if (!response.ok) throw new Error(`Failed to load Lessons.tsv (Status: ${response.status})`);
+                const buffer = await response.arrayBuffer();
+                allLessons = parseLessons(new TextDecoder('utf-8').decode(buffer));
+                if (allLessons.length === 0) throw new Error("Could not parse any lessons from the data file.");
+                updateDashboard();
+                setInterval(updateDashboard, 30000);
+            } catch (error) {
+                console.error(error);
+                const grid = document.getElementById('grid');
+                grid.style.gridTemplateColumns = '1fr'; grid.style.gridTemplateRows = '1fr';
+                grid.innerHTML = `<div class="message error"><h2>Error: Could not load schedule.</h2><p>${escapeHtml(error.message)}</p><p>Please make sure <b>Lessons.tsv</b> is in the same folder and public.</p></div>`;
+            }
+        }
+
+        window.addEventListener('resize', updateDashboard);
+        window.addEventListener('orientationchange', updateDashboard);
+        loadDataAndRun();
+    </script>
+</body>
+</html>
