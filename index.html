@@ -100,7 +100,10 @@
             html, body { overflow: auto; height: auto; }
             body { padding: 0.5vh; }
             #header { height: auto; flex-direction: column; }
-            #logo-container, #legend { display: none; }
+            #logo-container { display: none; }
+            #legend { flex: none; width: 100%; justify-content: center; font-size: 1rem; }
+            #legend .legend-item { display: none; }
+            .log-link { padding: 6px 16px; font-size: 1rem; }
             h1 { font-size: 1.8rem; }
             #clock { font-size: 1.2rem; }
             #week-display { font-size: 1rem; }
@@ -434,9 +437,19 @@
             }
 
             const iso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-            const period = nowMinutes < RESET_TIME ? 'fm' : 'em';
+            // En städmarkering gäller från klicket till nästa kl. 12:00 (även över midnatt).
+            const y = new Date(now); y.setDate(y.getDate() - 1);
+            const yIso = `${y.getFullYear()}-${String(y.getMonth() + 1).padStart(2, '0')}-${String(y.getDate()).padStart(2, '0')}`;
+            const boundary = (nowMinutes >= RESET_TIME ? iso : yIso) + ' ' + minutesToTime(RESET_TIME);
             cleaned = new Map();
-            for (const e of entries) if (e.date === iso && e.period === period) cleaned.set(e.room, { time: e.time, id: e.id });
+            const active = entries.filter(e => (e.date + ' ' + e.time) >= boundary)
+                                  .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+            for (const e of active) {
+                const c = cleaned.get(e.room) || { ids: [] };
+                c.ids.push(e.id);
+                c.time = (e.date === iso ? '' : 'Igår ') + e.time;
+                cleaned.set(e.room, c);
+            }
 
             let statuses = rooms.map(r => getRoomStatus(r, dayStr, currentWeek, nowMinutes, closed));
             if (HIDE_SHORT) statuses = statuses.filter(s => s.state !== 'short');
@@ -481,9 +494,15 @@
             const pin = getPin();
             if (!pin) return;
             try {
-                const { error } = c
-                    ? await sb.rpc('unmark_cleaned', { p_id: c.id, p_pin: pin })
-                    : await sb.rpc('mark_cleaned', { p_room: room, p_pin: pin });
+                let error = null;
+                if (c) {
+                    for (const id of c.ids) {
+                        const r = await sb.rpc('unmark_cleaned', { p_id: id, p_pin: pin });
+                        if (r.error) { error = r.error; break; }
+                    }
+                } else {
+                    error = (await sb.rpc('mark_cleaned', { p_room: room, p_pin: pin })).error;
+                }
                 if (error) {
                     if ((error.message || '').includes('fel pin')) { forgetPin(); alert('Fel PIN-kod.'); }
                     else throw error;
