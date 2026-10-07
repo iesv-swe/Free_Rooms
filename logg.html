@@ -42,17 +42,25 @@
     </div>
 
     <div id="content"></div>
-    <div class="note">Loggen sparas i den här webbläsaren och visar de senaste 90 dagarna.</div>
+    <div class="note">Loggen delas av alla skärmar och visar de senaste 90 dagarna. Uppdateras live.</div>
 
+    <script src="supabase.js"></script>
+    <script src="config.js"></script>
     <script>
-        const LOG_KEY = 'freeRooms.log';
+        const sb = window.supabase.createClient(window.FREE_ROOMS_CONFIG.url, window.FREE_ROOMS_CONFIG.key);
 
         function escapeHtml(s) {
             return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
         }
 
-        function readLog() {
-            try { const a = JSON.parse(localStorage.getItem(LOG_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+        let log = [];
+        async function loadLog() {
+            try {
+                const { data, error } = await sb.from('cleaned_rooms').select('id,date,period,room,time').order('date', { ascending: false }).limit(5000);
+                if (error) throw error;
+                log = data;
+            } catch (e) { console.error(e); }
+            render();
         }
 
         function formatDate(iso) {
@@ -68,7 +76,6 @@
 
         function render() {
             const content = document.getElementById('content');
-            const log = readLog();
             if (log.length === 0) {
                 content.innerHTML = '<div class="empty">Inga städade rum har loggats ännu.</div>';
                 return;
@@ -85,7 +92,9 @@
             }).join('');
         }
 
-        render();
+        loadLog();
+        sb.channel('cleaned-log').on('postgres_changes', { event: '*', schema: 'public', table: 'cleaned_rooms' }, loadLog).subscribe();
+        setInterval(loadLog, 60000);
     </script>
 </body>
 </html>

@@ -130,13 +130,15 @@
 
     <div id="grid"></div>
 
+    <script src="supabase.js"></script>
+    <script src="config.js"></script>
     <script>
         // ---------------- CONFIG (edit here) ----------------
         const excludedStaff = ["VikCos"];          // lessons with these teachers are skipped (same as Now & Next)
         const DAY_START = 7 * 60;                  // 07:00
         const DAY_END = 17 * 60;                   // 17:00
         const MIN_CLEAN_MINUTES = 30;              // free windows shorter than this are ignored
-        const RESET_TIME = 12 * 60;                // 12:00 – städmarkeringar nollställs (loggen sparas)
+        const RESET_TIME = 12 * 60;                // 12:00 – städmarkeringar nollställs (loggen sparas på servern)
         const HIDE_SHORT = true;                   // hide rooms that are free now but for less than MIN_CLEAN_MINUTES
         // Rooms matching any of these (case-insensitive regex) are never shown
         const EXCLUDED_ROOM_PATTERNS = [/^outside/i, /^#cart/i, /^lögarängen/i, /^vgf/i, /^hkk/i, /corridor/i];
@@ -148,41 +150,36 @@
 
         let allLessons = [];
 
-        // ---- Städmarkeringar: sparas per dag och halvdag (nollställs 12:00), samt i en logg ----
-        const CLEANED_KEY = 'freeRooms.cleaned';
-        const LOG_KEY = 'freeRooms.log';
-        let cleaned = new Map();   // rum -> 'HH:MM' då det markerades som städat
-        let cleanedDay = '';       // 'ÅÅÅÅ-MM-DD|fm' eller 'ÅÅÅÅ-MM-DD|em'
-        function loadCleaned(key) {
+        // ---- Supabase ----
+        const sb = window.supabase.createClient(window.FREE_ROOMS_CONFIG.url, window.FREE_ROOMS_CONFIG.key);
+
+        // ---- Städmarkeringar: delas mellan alla skärmar via Supabase (live) ----
+        let entries = [];          // alla loggade städningar
+        let cleaned = new Map();   // rum -> { time, id } för aktuell dag och halvdag (nollställs 12:00)
+        async function fetchEntries() {
             try {
-                const o = JSON.parse(localStorage.getItem(CLEANED_KEY) || 'null');
-                if (o && o.date === key) return new Map(Object.entries(o.rooms));
-            } catch (e) {}
-            return new Map();
+                const since = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
+                const { data, error } = await sb.from('cleaned_rooms').select('id,date,period,room,time').gte('date', since);
+                if (error) throw error;
+                entries = data;
+            } catch (e) { console.error(e); }
         }
-        function saveCleaned() {
-            try { localStorage.setItem(CLEANED_KEY, JSON.stringify({ date: cleanedDay, rooms: Object.fromEntries(cleaned) })); } catch (e) {}
+        function connectEvents() {
+            sb.channel('cleaned-rooms')
+              .on('postgres_changes', { event: '*', schema: 'public', table: 'cleaned_rooms' }, async () => { await fetchEntries(); updateDashboard(); })
+              .subscribe();
         }
-        function readLog() {
-            try { const a = JSON.parse(localStorage.getItem(LOG_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
-        }
-        function writeLog(a) {
-            try { localStorage.setItem(LOG_KEY, JSON.stringify(a)); } catch (e) {}
-        }
-        function addLog(date, room, time) {
-            const d = new Date(); d.setDate(d.getDate() - 90);
-            const cutoff = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-            const a = readLog().filter(x => x.date >= cutoff);
-            a.push({ date, room, time });
-            writeLog(a);
-        }
-        function removeLog(date, room, time) {
-            const a = readLog();
-            for (let i = a.length - 1; i >= 0; i--) {
-                if (a[i].date === date && a[i].room === room && a[i].time === time) { a.splice(i, 1); break; }
+        function getPin(forcePrompt) {
+            let pin = null;
+            try { pin = localStorage.getItem('freeRooms.pin'); } catch (e) {}
+            if (!pin || forcePrompt) {
+                pin = prompt('Ange PIN-kod för att markera städning:');
+                if (!pin) return null;
+                try { localStorage.setItem('freeRooms.pin', pin); } catch (e) {}
             }
-            writeLog(a);
+            return pin;
         }
+        function forgetPin() { try { localStorage.removeItem('freeRooms.pin'); } catch (e) {} }
         const CLEAN_ICON = `<svg class="clean-icon" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" stroke-linejoin="round" stroke-linecap="round">
             <g transform="translate(50 45) rotate(25)">
                 <line x1="0" y1="-50" x2="0" y2="12" stroke="#7a4a1d" stroke-width="5"/>
@@ -437,12 +434,13 @@
             }
 
             const iso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-            const periodKey = iso + (nowMinutes < RESET_TIME ? '|fm' : '|em');
-            if (cleanedDay !== periodKey) { cleaned = loadCleaned(periodKey); cleanedDay = periodKey; }
+            const period = nowMinutes < RESET_TIME ? 'fm' : 'em';
+            cleaned = new Map();
+            for (const e of entries) if (e.date === iso && e.period === period) cleaned.set(e.room, { time: e.time, id: e.id });
 
             let statuses = rooms.map(r => getRoomStatus(r, dayStr, currentWeek, nowMinutes, closed));
             if (HIDE_SHORT) statuses = statuses.filter(s => s.state !== 'short');
-            statuses.forEach(s => { s.cleaned = cleaned.has(s.room); s.cleanedAt = cleaned.get(s.room); });
+            statuses.forEach(s => { const c = cleaned.get(s.room); s.cleaned = !!c; s.cleanedAt = c && c.time; });
             if ((getURLParameter('show') || '').toLowerCase() === 'free') statuses = statuses.filter(s => s.state !== 'busy');
             statuses = sortStatuses(statuses, closed);
 
@@ -462,8 +460,10 @@
                 const buffer = await response.arrayBuffer();
                 allLessons = parseLessons(new TextDecoder('utf-8').decode(buffer));
                 if (allLessons.length === 0) throw new Error("Could not parse any lessons from the data file.");
+                await fetchEntries();
                 updateDashboard();
-                setInterval(updateDashboard, 30000);
+                connectEvents();
+                setInterval(async () => { await fetchEntries(); updateDashboard(); }, 30000);
             } catch (error) {
                 console.error(error);
                 const grid = document.getElementById('grid');
@@ -472,23 +472,26 @@
             }
         }
 
-        document.getElementById('grid').addEventListener('click', e => {
+        document.getElementById('grid').addEventListener('click', async e => {
             const card = e.target.closest('.room-card');
             if (!card) return;
             const room = card.dataset.room;
-            const iso = cleanedDay.split('|')[0];
-            if (cleaned.has(room)) {
-                if (!e.target.closest('.clear-btn')) return;   // bara krysset tar bort en städmarkering
-                removeLog(iso, room, cleaned.get(room));
-                cleaned.delete(room);
-            } else {
-                const t = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Stockholm" }));
-                const time = minutesToTime(t.getHours() * 60 + t.getMinutes());
-                cleaned.set(room, time);
-                addLog(iso, room, time);
-            }
-            saveCleaned();
-            updateDashboard();
+            const c = cleaned.get(room);
+            if (c && !e.target.closest('.clear-btn')) return;   // bara krysset tar bort en städmarkering
+            const pin = getPin();
+            if (!pin) return;
+            try {
+                const { error } = c
+                    ? await sb.rpc('unmark_cleaned', { p_id: c.id, p_pin: pin })
+                    : await sb.rpc('mark_cleaned', { p_room: room, p_pin: pin });
+                if (error) {
+                    if ((error.message || '').includes('fel pin')) { forgetPin(); alert('Fel PIN-kod.'); }
+                    else throw error;
+                    return;
+                }
+                await fetchEntries();
+                updateDashboard();
+            } catch (err) { console.error(err); alert('Kunde inte nå databasen.'); }
         });
 
         window.addEventListener('resize', updateDashboard);
